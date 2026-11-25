@@ -230,7 +230,7 @@ sVal(int x) => sP + sS * (x - sI)
 // ───────────────────────────── Day / session bookkeeping (CME day starts 18:00 ET)
 tz = "America/New_York"
 closeHHMM = hour(time_close, tz) * 100 + minute(time_close, tz)
-newDay = ta.change(time("D")) != 0
+newDay = timeframe.change("D")
 lastBarOfDay = closeHHMM >= flatHHMM
 var float dayStartNet = 0.0
 var int dayTrades = 0
@@ -320,10 +320,11 @@ dist = sig != 0 and not na(stopPx) ? sig * (close - stopPx) : na
 perContract = na(dist) ? na : dist * syminfo.pointvalue + rtCost + 2 * slipTicks * syminfo.mintick * syminfo.pointvalue
 qty = na(perContract) ? 0 : math.min(int(math.floor(riskUSD / perContract)), maxQty)
 tradeRisk = qty * nz(perContract)
-canTrade = sig != 0 and strategy.position_size == 0 and inSess and not lastBarOfDay and not halted
-     and (not useHTF or htfDir == sig) and (sig > 0 ? allowLong : allowShort)
-     and not na(dist) and dist >= minStopTk * syminfo.mintick and dist <= maxStopATR * atrV
-     and qty >= 1 and dayPnL - tradeRisk >= -dayShut
+bool gateBase = sig != 0 and strategy.position_size == 0 and inSess and not lastBarOfDay and not halted
+bool gateDir = (not useHTF or htfDir == sig) and (sig > 0 ? allowLong : allowShort)
+bool gateStop = not na(dist) and dist >= minStopTk * syminfo.mintick and dist <= maxStopATR * atrV
+bool gateRisk = qty >= 1 and dayPnL - tradeRisk >= -dayShut
+canTrade = gateBase and gateDir and gateStop and gateRisk
 
 // ───────────────────────────── Orders, stops and alerts
 var float curStop = na
