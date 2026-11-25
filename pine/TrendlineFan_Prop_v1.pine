@@ -1,0 +1,440 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 https://mozilla.org/MPL/2.0/
+// Trendline Fan Prop Strategy v1 — production build
+// Research basis: reports/RESEARCH_REPORT.md (Config 1: 4H trendline direction -> 1H trendline execution, MNQ).
+// Mirrors research/tl/trendlines.py + research/tl/engine.py. Non-repainting:
+//   * swing pivots are only used k bars after they form (confirmation delay)
+//   * HTF direction uses the PREVIOUS, completed HTF bar (lookahead_on + [1] idiom)
+//   * all signals evaluated on bar close; orders fill on the next bar open
+//@version=6
+strategy("Trendline Fan Prop v1", overlay = true, pyramiding = 0, initial_capital = 50000,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.75,
+     slippage = 1, process_orders_on_close = false, calc_on_every_tick = false,
+     max_bars_back = 3000, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 50)
+
+// ───────────────────────────── Inputs
+grpTL = "Trendlines"
+k         = input.int(1, "Pivot half-width k (1=3-candle, 2=5-candle, 3=7-candle)", minval = 1, maxval = 5, group = grpTL)
+tolATR    = input.float(0.25, "Touch tolerance (x ATR)", step = 0.05, group = grpTL)
+dispATR   = input.float(0.0, "Breakout displacement (x ATR)", step = 0.05, group = grpTL)
+minTouch  = input.int(2, "Min touches (bounce)", minval = 2, group = grpTL)
+maxBack   = input.int(12, "Max pivots searched back for Point A", minval = 2, maxval = 30, group = grpTL)
+maxSpan   = input.int(600, "Max bars between A and B", minval = 20, maxval = 2500, group = grpTL)
+atrLen    = input.int(14, "ATR length", group = grpTL)
+
+grpS = "Setups (validated set = A+B+C with 4H filter)"
+useA      = input.bool(true, "A: breakout (close through line)", group = grpS)
+useB      = input.bool(true, "B: bounce off active line", group = grpS)
+useC      = input.bool(true, "C: break-and-retest", group = grpS)
+fanOnly   = input.bool(false, "D: bounce only on steeper fan lines (gen>=2)", group = grpS)
+retestWin = input.int(10, "Retest window (bars)", group = grpS)
+useHTF    = input.bool(true, "E: require higher-timeframe trendline direction", group = grpS)
+htfTF     = input.timeframe("240", "Higher timeframe", group = grpS)
+allowLong = input.bool(true, "Allow longs", group = grpS)
+allowShort= input.bool(true, "Allow shorts", group = grpS)
+
+grpX = "Exits"
+exitMode  = input.string("Trendline trail", "Exit mode", options = ["Trendline trail", "Trendline trail + BE at 1R", "ATR trail", "Fixed R target"], group = grpX)
+targetR   = input.float(2.0, "Fixed target (R)", step = 0.25, group = grpX)
+trailATR  = input.float(2.0, "ATR trail multiple", step = 0.25, group = grpX)
+maxStopATR= input.float(4.0, "Skip setups with stop wider than (x ATR)", step = 0.25, group = grpX)
+minStopTk = input.int(4, "Min stop distance (ticks)", group = grpX)
+
+grpT = "Session (exchange time, America/New_York)"
+sessStart = input.int(930, "Signal-bar close not before (HHMM)", group = grpT)
+sessEnd   = input.int(1530, "Signal-bar close not after (HHMM)", group = grpT)
+flatHHMM  = input.int(1555, "Force flat on first bar closing at/after (HHMM)", group = grpT)
+
+grpR = "Risk engine ($)"
+riskUSD   = input.float(100, "Risk per trade", step = 10, group = grpR)
+rtCost    = input.float(1.50, "Round-turn cost per contract (for sizing)", step = 0.1, group = grpR)
+slipTicks = input.int(1, "Sizing slippage allowance (ticks/side)", group = grpR)
+maxQty    = input.int(50, "Max contracts (prop cap: 50 micros / 5 minis — verify)", group = grpR)
+dayShut   = input.float(550, "Internal shutdown: no trade that could take the day below -X", group = grpR)
+dayMax    = input.float(700, "Hard daily loss (realised+open) — flatten & stop", group = grpR)
+maxTrades = input.int(4, "Max trades per day", group = grpR)
+maxConsec = input.int(3, "Max consecutive losses per day", group = grpR)
+profitLock= input.float(0, "Stop new entries once day P&L >= (0=off)", group = grpR)
+
+grpA = "Automation"
+botId     = input.string("TLFAN1", "Strategy id sent to bridge", group = grpA)
+secret    = input.string("CHANGE_ME", "Webhook shared secret (visible to anyone with chart access!)", group = grpA)
+brokerSym = input.string("MNQ", "Broker root symbol (bridge maps to front month)", group = grpA)
+
+grpV = "Display"
+showFan   = input.bool(true, "Keep fan history", group = grpV)
+fanKeep   = input.int(6, "Fan lines kept per side", group = grpV)
+showTable = input.bool(true, "Status table", group = grpV)
+
+strategy.risk.max_intraday_loss(dayMax, strategy.cash)
+
+// ───────────────────────────── Trendline engine (deterministic fan)
+// Returns the state AFTER this bar closes. Identical rules to research/tl/trendlines.py.
+makeLine(array<int> pIdx, array<float> pPx, bool isRes, float a) =>
+    int n = array.size(pIdx)
+    bool ok = false
+    int ai = na
+    float ap = na
+    float sl = na
+    int touch = 0
+    if n >= 2
+        int bi = array.get(pIdx, n - 1)
+        float bp = array.get(pPx, n - 1)
+        int lo = math.max(0, n - 1 - maxBack)
+        for j = n - 2 to lo
+            if ok
+                break
+            int cai = array.get(pIdx, j)
+            float cap = array.get(pPx, j)
+            bool higherA = isRes ? cap > bp : cap < bp
+            if not higherA or bi - cai > maxSpan or bar_index - cai > 2900
+                continue
+            float csl = (bp - cap) / (bi - cai)
+            bool valid = true
+            // A..B: no bar pierces the ray by more than tol*ATR
+            for x = cai + 1 to bi - 1
+                if x > bi - 1
+                    break
+                float lv = cap + csl * (x - cai)
+                int off = bar_index - x
+                if isRes ? high[off] - lv > tolATR * a : lv - low[off] > tolATR * a
+                    valid := false
+                    break
+            // B..now: no close beyond the ray
+            if valid
+                for x = bi + 1 to bar_index
+                    if x > bar_index
+                        break
+                    float lv = cap + csl * (x - cai)
+                    int off = bar_index - x
+                    if isRes ? close[off] > lv : close[off] < lv
+                        valid := false
+                        break
+            if valid
+                int tc = 2
+                if j + 1 <= n - 2
+                    for m = j + 1 to n - 2
+                        float pp = array.get(pPx, m)
+                        if math.abs(pp - (cap + csl * (array.get(pIdx, m) - cai))) <= tolATR * a
+                            tc += 1
+                ok := true
+                ai := cai
+                ap := cap
+                sl := csl
+                touch := tc
+    [ok, ai, ap, sl, touch]
+
+tlEngine() =>
+    float a = ta.atr(atrLen)
+    var array<int> phI = array.new<int>()
+    var array<float> phP = array.new<float>()
+    var array<int> plI = array.new<int>()
+    var array<float> plP = array.new<float>()
+    var bool rOk = false
+    var int rI = 0
+    var float rP = na
+    var float rS = na
+    var int rT = 0
+    var int rG = 0
+    var int rB = -1
+    var bool sOk = false
+    var int sI = 0
+    var float sP = na
+    var float sS = na
+    var int sT = 0
+    var int sG = 0
+    var int sB = -1
+    var float lastPH = na
+    var float lastPL = na
+    var int dir = 0
+    bool rBreak = false
+    bool sBreak = false
+    int rbI = na
+    float rbP = na
+    float rbS = na
+    int sbI = na
+    float sbP = na
+    float sbS = na
+    // 1) breaks vs lines known at the previous bar
+    if rOk and close > rP + rS * (bar_index - rI) + dispATR * a
+        rBreak := true
+        rbI := rI
+        rbP := rP
+        rbS := rS
+        rOk := false
+        dir := 1
+    if sOk and close < sP + sS * (bar_index - sI) - dispATR * a
+        sBreak := true
+        sbI := sI
+        sbP := sP
+        sbS := sS
+        sOk := false
+        dir := -1
+    // 2) pivots confirmed this bar (pivot at bar_index - k)
+    float hiW = ta.highest(high, 2 * k + 1)
+    float hiL = ta.highest(high[k + 1], k)
+    float loW = ta.lowest(low, 2 * k + 1)
+    float loL = ta.lowest(low[k + 1], k)
+    if bar_index >= 2 * k
+        bool isPH = high[k] == hiW and high[k] > hiL
+        bool isPL = low[k] == loW and low[k] < loL
+        if isPH
+            array.push(phI, bar_index - k)
+            array.push(phP, high[k])
+            lastPH := high[k]
+            if array.size(phI) > 60
+                array.shift(phI)
+                array.shift(phP)
+            [ok, ai, ap, sl, tc] = makeLine(phI, phP, true, a)
+            if ok
+                rG := rOk and ai == rB ? rG + 1 : 1
+                rOk := true
+                rI := ai
+                rP := ap
+                rS := sl
+                rT := tc
+                rB := bar_index - k
+        if isPL
+            array.push(plI, bar_index - k)
+            array.push(plP, low[k])
+            lastPL := low[k]
+            if array.size(plI) > 60
+                array.shift(plI)
+                array.shift(plP)
+            [ok, ai, ap, sl, tc] = makeLine(plI, plP, false, a)
+            if ok
+                sG := sOk and ai == sB ? sG + 1 : 1
+                sOk := true
+                sI := ai
+                sP := ap
+                sS := sl
+                sT := tc
+                sB := bar_index - k
+    [a, rOk, rI, rP, rS, rT, rG, sOk, sI, sP, sS, sT, sG, rBreak, sBreak, rbI, rbP, rbS, sbI, sbP, sbS, lastPH, lastPL, dir]
+
+htfDirPrev() =>
+    [_a, _rOk, _rI, _rP, _rS, _rT, _rG, _sOk, _sI, _sP, _sS, _sT, _sG, _rBk, _sBk, _rbI, _rbP, _rbS, _sbI, _sbP, _sbS, _lph, _lpl, d] = tlEngine()
+    d[1]
+
+// previous-bar line state (needed by bounce logic: lines known before this bar)
+[atrV, rOk, rI, rP, rS, rT, rG, sOk, sI, sP, sS, sT, sG, rBreak, sBreak, rbI, rbP, rbS, sbI, sbP, sbS, lastPH, lastPL, ltfDir] = tlEngine()
+float htfDir = useHTF ? request.security(syminfo.tickerid, htfTF, htfDirPrev(), lookahead = barmerge.lookahead_on) : 0.0
+
+rOkP = rOk[1]
+sOkP = sOk[1]
+rValPrev(int x) => rP[1] + rS[1] * (x - rI[1])
+sValPrev(int x) => sP[1] + sS[1] * (x - sI[1])
+rVal(int x) => rP + rS * (x - rI)
+sVal(int x) => sP + sS * (x - sI)
+
+// ───────────────────────────── Day / session bookkeeping (CME day starts 18:00 ET)
+tz = "America/New_York"
+closeHHMM = hour(time_close, tz) * 100 + minute(time_close, tz)
+newDay = ta.change(time("D")) != 0
+lastBarOfDay = closeHHMM >= flatHHMM
+var float dayStartNet = 0.0
+var int dayTrades = 0
+var int consec = 0
+var int lastClosed = 0
+if newDay
+    dayStartNet := strategy.netprofit
+    dayTrades := 0
+    consec := 0
+if strategy.closedtrades > lastClosed
+    for i = lastClosed to strategy.closedtrades - 1
+        consec := strategy.closedtrades.profit(i) < 0 ? consec + 1 : 0
+    lastClosed := strategy.closedtrades
+dayRealized = strategy.netprofit - dayStartNet
+dayPnL = dayRealized + strategy.openprofit
+halted = dayPnL <= -dayMax or consec >= maxConsec or dayTrades >= maxTrades or (profitLock > 0 and dayPnL >= profitLock)
+
+// ───────────────────────────── Signals (bar close)
+int sig = 0
+float stopPx = na
+if useA
+    if rBreak
+        sig := 1
+    else if sBreak
+        sig := -1
+if sig == 0 and useB
+    int mg = fanOnly ? 2 : 1
+    if sOkP and sT[1] >= minTouch and sG[1] >= mg
+        v = sValPrev(bar_index)
+        if low <= v + tolATR * atrV and close > v and close > open
+            sig := 1
+            stopPx := math.min(low, sValPrev(bar_index + 1)) - 0.1 * atrV
+    if sig == 0 and rOkP and rT[1] >= minTouch and rG[1] >= mg
+        v = rValPrev(bar_index)
+        if high >= v - tolATR * atrV and close < v and close < open
+            sig := -1
+            stopPx := math.max(high, rValPrev(bar_index + 1)) + 0.1 * atrV
+// C: break-and-retest
+var int rtLi = na
+var float rtLp = na
+var float rtLs = na
+var int rtLb = na
+var int rtSi = na
+var float rtSp = na
+var float rtSs = na
+var int rtSb = na
+if useC
+    if rBreak
+        rtLi := rbI
+        rtLp := rbP
+        rtLs := rbS
+        rtLb := bar_index
+        rtSb := na
+    if sBreak
+        rtSi := sbI
+        rtSp := sbP
+        rtSs := sbS
+        rtSb := bar_index
+        rtLb := na
+    if sig == 0 and not na(rtLb) and bar_index > rtLb
+        v = rtLp + rtLs * (bar_index - rtLi)
+        if bar_index - rtLb > retestWin or close < v - 0.5 * atrV
+            rtLb := na
+        else if low <= v + tolATR * atrV and close > v and close > open
+            sig := 1
+            stopPx := math.min(low, v) - 0.1 * atrV
+            rtLb := na
+    if sig == 0 and not na(rtSb) and bar_index > rtSb
+        v = rtSp + rtSs * (bar_index - rtSi)
+        if bar_index - rtSb > retestWin or close > v + 0.5 * atrV
+            rtSb := na
+        else if high >= v - tolATR * atrV and close < v and close < open
+            sig := -1
+            stopPx := math.max(high, v) + 0.1 * atrV
+            rtSb := na
+
+// breakout stop = opposite active trendline (else last confirmed swing)
+if sig != 0 and na(stopPx)
+    if sig > 0
+        stopPx := sOk and sVal(bar_index + 1) < close ? sVal(bar_index + 1) - syminfo.mintick : lastPL - syminfo.mintick
+    else
+        stopPx := rOk and rVal(bar_index + 1) > close ? rVal(bar_index + 1) + syminfo.mintick : lastPH + syminfo.mintick
+stopPx := na(stopPx) ? na : math.round_to_mintick(stopPx)
+
+inSess = closeHHMM >= sessStart and closeHHMM <= sessEnd
+dist = sig != 0 and not na(stopPx) ? sig * (close - stopPx) : na
+perContract = na(dist) ? na : dist * syminfo.pointvalue + rtCost + 2 * slipTicks * syminfo.mintick * syminfo.pointvalue
+qty = na(perContract) ? 0 : math.min(int(math.floor(riskUSD / perContract)), maxQty)
+tradeRisk = qty * nz(perContract)
+canTrade = sig != 0 and strategy.position_size == 0 and inSess and not lastBarOfDay and not halted
+     and (not useHTF or htfDir == sig) and (sig > 0 ? allowLong : allowShort)
+     and not na(dist) and dist >= minStopTk * syminfo.mintick and dist <= maxStopATR * atrV
+     and qty >= 1 and dayPnL - tradeRisk >= -dayShut
+
+// ───────────────────────────── Orders, stops and alerts
+var float curStop = na
+var float curTarget = na
+var float entryRisk = na
+var string tradeId = ""
+jsonMsg(string action, string side, int q, float st, float tg) =>
+    '{"secret":"' + secret + '","bot":"' + botId + '","id":"' + tradeId + '","action":"' + action + '","side":"' + side +
+     '","symbol":"' + brokerSym + '","qty":' + str.tostring(q) + ',"stop":' + (na(st) ? 'null' : str.tostring(st)) +
+     ',"target":' + (na(tg) ? 'null' : str.tostring(tg)) + ',"risk_usd":' + str.tostring(math.round(tradeRisk, 2)) +
+     ',"bar_time":' + str.tostring(time) + '}'
+
+if canTrade
+    tradeId := botId + "-" + str.tostring(time_close) + (sig > 0 ? "-L" : "-S")
+    curStop := stopPx
+    entryRisk := dist
+    curTarget := exitMode == "Fixed R target" ? close + sig * targetR * dist : na
+    dayTrades += 1
+    if sig > 0
+        strategy.entry("L", strategy.long, qty, comment = "L " + str.tostring(qty))
+    else
+        strategy.entry("S", strategy.short, qty, comment = "S " + str.tostring(qty))
+    alert(jsonMsg("entry", sig > 0 ? "buy" : "sell", qty, curStop, curTarget), alert.freq_once_per_bar_close)
+
+// trailing stop for the next bar (position already open)
+pos = strategy.position_size
+if pos != 0 and not canTrade
+    float ep = strategy.position_avg_price
+    float prevStop = curStop
+    if exitMode == "Trendline trail" or exitMode == "Trendline trail + BE at 1R"
+        if pos > 0 and sOk and sVal(bar_index + 1) - syminfo.mintick < close
+            curStop := math.max(curStop, sVal(bar_index + 1) - syminfo.mintick)
+        if pos < 0 and rOk and rVal(bar_index + 1) + syminfo.mintick > close
+            curStop := math.min(curStop, rVal(bar_index + 1) + syminfo.mintick)
+        if exitMode == "Trendline trail + BE at 1R" and not na(entryRisk) and (pos > 0 ? close - ep : ep - close) >= entryRisk
+            curStop := pos > 0 ? math.max(curStop, ep) : math.min(curStop, ep)
+    else if exitMode == "ATR trail"
+        curStop := pos > 0 ? math.max(curStop, close - trailATR * atrV) : math.min(curStop, close + trailATR * atrV)
+    curStop := math.round_to_mintick(curStop)
+    if curStop != prevStop
+        alert(jsonMsg("modify_stop", pos > 0 ? "buy" : "sell", int(math.abs(pos)), curStop, curTarget), alert.freq_once_per_bar_close)
+
+if strategy.position_size > 0 or (canTrade and sig > 0)
+    strategy.exit("XL", "L", stop = curStop, limit = curTarget)
+if strategy.position_size < 0 or (canTrade and sig < 0)
+    strategy.exit("XS", "S", stop = curStop, limit = curTarget)
+
+// session flat (prop: intraday only) and hard daily stop
+if strategy.position_size != 0 and (lastBarOfDay or dayPnL <= -dayMax)
+    strategy.close_all(comment = lastBarOfDay ? "flat EOD" : "daily max loss")
+    alert(jsonMsg("flatten", "none", 0, na, na), alert.freq_once_per_bar_close)
+
+// heartbeat / reconciliation snapshot every bar close
+alert('{"secret":"' + secret + '","bot":"' + botId + '","action":"sync","symbol":"' + brokerSym + '","position":' +
+     str.tostring(strategy.position_size) + ',"stop":' + (na(curStop) or strategy.position_size == 0 ? 'null' : str.tostring(curStop)) +
+     ',"day_pnl":' + str.tostring(math.round(dayPnL, 2)) + ',"halted":' + (halted ? 'true' : 'false') + ',"bar_time":' + str.tostring(time) + '}',
+     alert.freq_once_per_bar_close)
+
+// ───────────────────────────── Drawing
+var line resLn = na
+var line supLn = na
+var array<line> fanR = array.new<line>()
+var array<line> fanS = array.new<line>()
+drawLine(bool ok, int i0, float p0, float s0, line prev, array<line> keep, color col) =>
+    line out = prev
+    if ok
+        if na(prev) or line.get_x1(prev) != i0 or line.get_y1(prev) != p0
+            if not na(prev)
+                if showFan
+                    float oldSlope = (line.get_y2(prev) - line.get_y1(prev)) / math.max(line.get_x2(prev) - line.get_x1(prev), 1)
+                    float yEnd = line.get_y1(prev) + oldSlope * (bar_index - line.get_x1(prev))
+                    line.set_extend(prev, extend.none)
+                    line.set_xy2(prev, bar_index, yEnd)
+                    line.set_color(prev, color.new(col, 70))
+                    array.push(keep, prev)
+                    if array.size(keep) > fanKeep
+                        line.delete(array.shift(keep))
+                else
+                    line.delete(prev)
+            out := line.new(i0, p0, i0 + 1, p0 + s0, extend = extend.right, color = col, width = 2)
+    else if not na(prev)
+        float oldSlope2 = (line.get_y2(prev) - line.get_y1(prev)) / math.max(line.get_x2(prev) - line.get_x1(prev), 1)
+        line.set_extend(prev, extend.none)
+        line.set_xy2(prev, bar_index, line.get_y1(prev) + oldSlope2 * (bar_index - line.get_x1(prev)))
+        line.set_color(prev, color.new(col, 85))
+        out := na
+    out
+resLn := drawLine(rOk, rI, rP, rS, resLn, fanR, color.red)
+supLn := drawLine(sOk, sI, sP, sS, supLn, fanS, color.teal)
+
+plotshape(rBreak, "Resistance break", shape.triangleup, location.belowbar, color.new(color.teal, 0), size = size.tiny)
+plotshape(sBreak, "Support break", shape.triangledown, location.abovebar, color.new(color.red, 0), size = size.tiny)
+plot(strategy.position_size != 0 ? curStop : na, "Stop", color.orange, 2, plot.style_linebr)
+plot(strategy.position_size != 0 ? curTarget : na, "Target", color.lime, 2, plot.style_linebr)
+bgcolor(useHTF ? (htfDir > 0 ? color.new(color.teal, 94) : htfDir < 0 ? color.new(color.red, 94) : na) : na, title = "HTF direction")
+
+var table tb = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 20), border_width = 1)
+if showTable and barstate.islast
+    table.cell(tb, 0, 0, "HTF dir", text_color = color.white)
+    table.cell(tb, 1, 0, htfDir > 0 ? "UP" : htfDir < 0 ? "DOWN" : "n/a", text_color = htfDir > 0 ? color.teal : color.red)
+    table.cell(tb, 0, 1, "Day P&L", text_color = color.white)
+    table.cell(tb, 1, 1, str.tostring(dayPnL, "#.##"), text_color = dayPnL >= 0 ? color.teal : color.red)
+    table.cell(tb, 0, 2, "Trades today", text_color = color.white)
+    table.cell(tb, 1, 2, str.tostring(dayTrades) + " / " + str.tostring(maxTrades), text_color = color.white)
+    table.cell(tb, 0, 3, "Consec. losses", text_color = color.white)
+    table.cell(tb, 1, 3, str.tostring(consec) + " / " + str.tostring(maxConsec), text_color = color.white)
+    table.cell(tb, 0, 4, "Open risk $", text_color = color.white)
+    table.cell(tb, 1, 4, strategy.position_size != 0 ? str.tostring(math.abs(strategy.position_avg_price - curStop) * syminfo.pointvalue * math.abs(strategy.position_size), "#.##") : "0", text_color = color.white)
+    table.cell(tb, 0, 5, "Shutdown", text_color = color.white)
+    table.cell(tb, 1, 5, halted ? "HALTED" : "active", text_color = halted ? color.red : color.teal)
+    table.cell(tb, 0, 6, "Risk/trade", text_color = color.white)
+    table.cell(tb, 1, 6, "$" + str.tostring(riskUSD), text_color = color.white)
+    table.cell(tb, 0, 7, "Lines R/S gen", text_color = color.white)
+    table.cell(tb, 1, 7, str.tostring(rG) + " / " + str.tostring(sG), text_color = color.white)

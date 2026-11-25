@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.sqlite
+bridge/config.json
+# Raw exchange data pulled from TradingView under the user's data subscription; not redistributed.
+data/raw/

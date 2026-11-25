@@ -1,0 +1,25 @@
+{
+  "secret": "replace-with-long-random-string",
+  "admin_token": "replace-with-another-long-random-string",
+  "host": "127.0.0.1",
+  "port": 8080,
+  "db": "bridge_state.sqlite",
+  "heartbeat_timeout_s": 5400,
+  "watchdog_s": 2,
+  "max_broker_errors": 3,
+  "limits": {
+    "daily_max_loss": 700,
+    "daily_shutdown": 550,
+    "max_risk_per_trade": 150,
+    "max_open_risk": 150,
+    "max_trades_per_day": 4,
+    "max_consecutive_losses": 3,
+    "cooldown_minutes_after_loss": 0,
+    "profit_lock": 0,
+    "slippage_ticks": 1,
+    "entry_window_et": ["09:30", "15:35"],
+    "flat_by_et": "15:58",
+    "day_roll_et": "18:00",
+    "allowed_roots": ["MNQ"]
+  }
+}
