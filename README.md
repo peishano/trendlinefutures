@@ -18,4 +18,4 @@ Research, backtest and automation package for a systematic trendline futures str
 | `research/` | Python backtester (`tl/`), experiment scripts (`run_*.py`), no‑look‑ahead tests |
 | `bridge/` | Webhook execution bridge with an independent risk engine + tests |
 | `reports/` | CSV outputs of every experiment |
-| `data/raw/` | TradingView OHLCV (NQ/ES/YM/RTY; 4H, 1H, 15M, 5M, 1M) |
+| `data/raw/` | TradingView OHLCV (NQ/ES/YM/RTY; 4H, 1H, 15M, 5M, 1M), bar-open unix seconds UTC |
