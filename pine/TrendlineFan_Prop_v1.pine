@@ -10,7 +10,8 @@ strategy("Trendline Fan Prop v1", overlay = true, pyramiding = 0, initial_capita
      default_qty_type = strategy.fixed, default_qty_value = 1,
      commission_type = strategy.commission.cash_per_contract, commission_value = 0.75,
      slippage = 1, process_orders_on_close = false, calc_on_every_tick = false,
-     max_bars_back = 3000, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 50)
+     max_bars_back = 3000, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 50,
+     margin_long = 0, margin_short = 0)  // futures: margin is the broker's/prop's job, not a % of notional
 
 // ───────────────────────────── Inputs
 grpTL = "Trendlines"
@@ -222,8 +223,18 @@ float htfDir = useHTF ? request.security(syminfo.tickerid, htfTF, htfDirPrev(), 
 
 rOkP = rOk[1]
 sOkP = sOk[1]
-rValPrev(int x) => rP[1] + rS[1] * (x - rI[1])
-sValPrev(int x) => sP[1] + sS[1] * (x - sI[1])
+float rP1 = rP[1]
+float rS1 = rS[1]
+int rI1 = rI[1]
+float sP1 = sP[1]
+float sS1 = sS[1]
+int sI1 = sI[1]
+int rT1 = rT[1]
+int rG1 = rG[1]
+int sT1 = sT[1]
+int sG1 = sG[1]
+rValPrev(int x) => rP1 + rS1 * (x - rI1)
+sValPrev(int x) => sP1 + sS1 * (x - sI1)
 rVal(int x) => rP + rS * (x - rI)
 sVal(int x) => sP + sS * (x - sI)
 
@@ -258,12 +269,12 @@ if useA
         sig := -1
 if sig == 0 and useB
     int mg = fanOnly ? 2 : 1
-    if sOkP and sT[1] >= minTouch and sG[1] >= mg
+    if sOkP and sT1 >= minTouch and sG1 >= mg
         v = sValPrev(bar_index)
         if low <= v + tolATR * atrV and close > v and close > open
             sig := 1
             stopPx := math.min(low, sValPrev(bar_index + 1)) - 0.1 * atrV
-    if sig == 0 and rOkP and rT[1] >= minTouch and rG[1] >= mg
+    if sig == 0 and rOkP and rT1 >= minTouch and rG1 >= mg
         v = rValPrev(bar_index)
         if high >= v - tolATR * atrV and close < v and close < open
             sig := -1

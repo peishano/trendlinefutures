@@ -29,7 +29,7 @@ Labels used throughout:
 6. **Automation may be against the prop‑firm rules.** Two third‑party reviews state that IQ Capital *prohibits automated trading and bots*. I could not reach IQ Capital's own rule pages from this environment. **Get written confirmation from IQ Capital before connecting any automation to the account.** See `docs/PROP_RULES.md`.
 
 **Recommendation:** Do not trade the $50K evaluation with this system yet.
-* Compile the Pine script and match its trades against the Python engine.
+* The Pine script now compiles. TradingView's own backtest reproduces the result (178 trades, PF 1.45, +$3,440, max DD $1,375; see `docs/AUTOMATION.md`).
 * Paper‑trade it through the bridge for at least 3 months; it only makes about 3–4 trades a month.
 * If you go live, keep risk at **$100 per trade** with a 4‑trade, 3‑loss, $550/$700 daily cap.
 * **Do not use a daily profit target.**

@@ -14,7 +14,7 @@ Research, backtest and automation package for a systematic trendline futures str
 | `docs/RESEARCH_REPORT.md` | Stages 1, 3, 4, 5, 8 — transcript analysis, algorithm, all backtests, final spec |
 | `docs/PROP_RULES.md` | Stage 2 — prop‑firm rules (third‑party‑sourced, unverified), questions for IQ Capital |
 | `docs/AUTOMATION.md` | Stages 6–7 — Pine setup, alerts, webhook templates, bridge, deployment, paper‑trading plan |
-| `pine/TrendlineFan_Prop_v1.pine` | Production Pine Script v6 strategy (not yet compiled — see AUTOMATION.md) |
+| `pine/TrendlineFan_Prop_v1.pine` | Production Pine Script v6 strategy (compiles; TradingView backtest PF 1.45 vs Python 1.59 — see AUTOMATION.md) |
 | `research/` | Python backtester (`tl/`), experiment scripts (`run_*.py`), no‑look‑ahead tests |
 | `bridge/` | Webhook execution bridge with an independent risk engine + tests |
 | `reports/` | CSV outputs of every experiment |

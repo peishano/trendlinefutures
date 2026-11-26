@@ -10,10 +10,28 @@
 
 File: `pine/TrendlineFan_Prop_v1.pine`.
 
-**Compile status: NOT YET COMPILED.**
-* The TradingView API's daily quota was exhausted during data collection, so the validator could not be called.
-* The code was reviewed by hand against Pine v6 rules.
-* Expect possibly a few compiler messages on the first paste. Paste any error back and it can be fixed quickly.
+**Compile status: COMPILES, 0 errors, 0 warnings in the trading logic** (TradingView validator, 2026‑11‑26).
+The only remaining note is TradingView's standard reminder that `barstate.islast` is evaluated on confirmed bars; it only affects the status table.
+
+**TradingView backtest (Deep Backtesting, CME_MINI:MNQ1! 1H, 2023‑01‑03 → 2026‑11‑25, default inputs):**
+
+| | Python engine (Pine's 4H timing) | TradingView |
+|---|---|---|
+| Trades | 169 | 178 |
+| Net profit | +$4,277 | +$3,440 |
+| Profit factor | 1.59 | 1.45 |
+| Win rate | — | 33.7% |
+| Max drawdown | $1,260 | $1,375 |
+| Long / short net | — | +$785 / +$2,656 |
+
+The two engines agree within ~5% on trade count. The remaining P&L gap comes from:
+* fill and rounding details,
+* ATR seeding,
+* MNQ1! vs NQ1! roll handling.
+
+With the Python engine's own HTF timing (which uses the 4H bar that has just closed), the result is +$4,849 / PF 1.65. The Pine script deliberately uses the one‑bar‑more‑conservative, non‑repainting timing.
+
+**Required setting: margin 0%.** The strategy declares `margin_long = 0, margin_short = 0`. With TradingView's default 100% margin, 2–3 MNQ contracts (about $72k notional) exceed the $50k equity. TradingView then silently caps size at 1 contract, skips trades, and issues false "margin call" exits; the first compile run showed only +$652 for this reason. Futures margin is enforced by the broker or prop firm, not by the backtester.
 
 ### Add it to TradingView
 
