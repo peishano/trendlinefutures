@@ -390,3 +390,29 @@ To extend the data (for example more 5M/1M history, or YM/RTY lower timeframes),
 * Costs dominate on 1H at 1% risk: tight stops mean many contracts, so commissions and slippage are 0.1–0.2R per trade.
 
 **Verdict:** this confirms Tori's own words and transcript 2. Taking every 1H trendline break is break‑even at best (MNQ) and a heavy loser elsewhere. With overnight holding, 1% risk and $28k–$190k drawdowns, it is not viable on a 50K prop account. The only workable 1H variant found is the intraday, 4H‑filtered MNQ version at $100 risk (§5).
+
+## 12. Addendum — MNQ 1H intraday with the 4H filter at $100 risk, by setup (`research/run_1h_mnq_intraday.py`)
+
+**Setup:**
+* Intraday: signal‑bar close 09:30–15:30 ET, flat by 15:55 ET.
+* Full risk engine: $550 shutdown / $700 hard stop, 4 trades per day, 3 consecutive losses.
+* 4H filter with Pine timing (previous completed 4H bar).
+* 2023‑01 → 2026‑11 (201 weeks).
+* The random benchmark uses the same filter, exits and sizing, with a calibrated trade count (150 runs).
+
+| Swings | Setups | Trades | PF | Net | $/week | Max DD | Best day | Win/lose weeks | Beats random |
+|---|---|---|---|---|---|---|---|---|---|
+| 3‑candle | A | 53 | 2.46 | $3,719 | $18.5 | $580 | $3,162 | 14/34 | 89% |
+| 3‑candle | A+B | 138 | 1.60 | $3,576 | $17.8 | $912 | $1,605 | 40/62 | 69% |
+| 3‑candle | A+B+C | 169 | 1.59 | $4,277 | $21.3 | $1,260 | $1,615 | 44/67 | 77% |
+| 5‑candle | A | 14 | 5.27 | $2,393 | $11.9 | $268 | $1,753 | 6/7 | 97% |
+| 5‑candle | A+B | 59 | 1.79 | $2,026 | $10.1 | $490 | $1,753 | 16/36 | 88% |
+| 5‑candle | A+B+C | 83 | 1.67 | $2,522 | $12.6 | $795 | $1,753 | 22/44 | 91% |
+
+All six variants are positive with small drawdowns, and none hit the daily limits.
+
+**Caveats:**
+* Profit is concentrated in a handful of days. For breakouts‑only (3‑candle), one day (+$3,162) is 85% of the total.
+* There are more losing weeks than winning weeks in every variant.
+* 2025 is roughly flat and 2026 is negative in every variant.
+* Only the 5‑candle variants beat ≥88% of random entries; the 3‑candle variants beat 69–89%.
