@@ -324,3 +324,34 @@ python3 -m pytest -q tests ../bridge/tests
 ```
 
 To extend the data (for example more 5M/1M history, or YM/RTY lower timeframes), pull bars with TradingView `get_ohlcv` and save them as JSON dumps. Then run `research/ingest.py <dir>`; it de‑duplicates and merges into `data/raw/{SYM}_{TF}.csv` (columns t,o,h,l,c,v; t = bar‑open unix seconds UTC).
+
+---
+
+## 10. Addendum — 4H backtest "like Tori trades" (`research/run_4h_tori.py`, `reports/tori_4h*.csv`)
+
+**Setup:**
+* 4H execution, overnight and weekend holding allowed.
+* Breakout entries (A) and breakout + bounce (A+B).
+* Stop on the opposite or own trendline, trailed along the line; no target.
+* **1% risk ($500) per trade** in micros.
+* Optional top‑down filter: daily trendline direction, built from the 4H bars, using the previous completed day.
+* Period 2019‑06 → 2026‑11 (~390 weeks). Costs included. The random benchmark is 60 runs with the same exits and sizing.
+
+**Base case: 3‑candle swings, breakouts only, no filter (closest to her teaching):**
+
+| Micro | Trades | Win % | PF | Net | Avg/week | Max DD | Worst day | Beats random |
+|---|---|---|---|---|---|---|---|---|
+| MNQ | 1,075 | 34% | 1.18 | +$41,716 | +$108 | $19,376 | −$1,369 | 83% |
+| MES | 1,291 | 33% | 0.89 | −$30,896 | −$80 | $48,164 | −$2,622 | 42% |
+| MYM | 1,291 | 32% | 0.95 | −$13,480 | −$35 | $32,280 | −$1,617 | 32% |
+| M2K | 1,285 | 35% | 1.05 | +$12,422 | +$32 | $20,890 | −$1,670 | 83% |
+
+**Year by year (MNQ):** +16.4k, −2.0k, +1.0k, −1.3k, +31.9k, +5.8k, −3.1k, −7.1k for 2019 → 2026.
+
+**Findings:**
+* Results are inconsistent across the 32 combinations. MNQ with 5‑candle swings flips to −$21.9k. M2K with the daily filter ranges from −$43k to +$34k depending on the setup mix.
+* No configuration is positive on all four markets.
+* At 1% risk, drawdowns ($10k–$48k) and single‑day losses (−$1.0k to −$2.6k, including overnight gaps) are far outside a 50K prop account's reported $2,000 trailing drawdown and $1,000 daily limit.
+* Holding overnight is also reportedly not allowed on the account.
+
+**Verdict:** the 4H method as she teaches it is not tradable on this account. Its edge, where it shows up, is concentrated in MNQ and in 2019/2023.
