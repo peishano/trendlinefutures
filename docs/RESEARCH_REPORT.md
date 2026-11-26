@@ -355,3 +355,38 @@ To extend the data (for example more 5M/1M history, or YM/RTY lower timeframes),
 * Holding overnight is also reportedly not allowed on the account.
 
 **Verdict:** the 4H method as she teaches it is not tradable on this account. Its edge, where it shows up, is concentrated in MNQ and in 2019/2023.
+
+## 11. Addendum — 1H backtest "like Tori used to trade" (`research/run_1h_tori.py`, `reports/tori_1h*.csv`)
+
+**Setup:** same rules as §10, but executed on 1H.
+* Overnight and weekend holding allowed.
+* 1% risk ($500) per trade in micros.
+* Breakout (A) or breakout + bounce (AB); 3‑ or 5‑candle swings.
+* Top‑down filter: none, 4H, or daily trendline direction.
+* Period 2023‑01 → 2026‑11 (~200 weeks); the 1H data starts in 2023. Costs included.
+
+**Base case: 3‑candle swings, breakouts, no filter:**
+
+| Micro | Trades | Win % | PF | Net | Avg/week | Max DD | Worst day | Beats random |
+|---|---|---|---|---|---|---|---|---|
+| MNQ | 2,608 | 32% | 1.02 | +$10,308 | +$51 | $70,125 | −$2,661 | 40% |
+| MES | 2,652 | 30% | 0.73 | −$163,903 | −$812 | $191,895 | −$2,867 | 0% |
+| MYM | 2,691 | 29% | 0.85 | −$98,135 | −$486 | $117,169 | −$2,536 | 28% |
+| M2K | 2,663 | 30% | 0.83 | −$106,643 | −$528 | $112,061 | −$2,831 | 38% |
+
+**Base case by year:**
+
+| Year | MNQ | MES | MYM | M2K |
+|---|---|---|---|---|
+| 2023 | −$15.8k | −$38.1k | −$52.4k | −$32.7k |
+| 2024 | −$16.5k | −$50.9k | −$40.9k | −$23.5k |
+| 2025 | +$29.7k | −$42.2k | +$9.2k | −$33.1k |
+| 2026 | +$12.8k | −$32.8k | −$14.0k | −$17.4k |
+
+**Findings:**
+* With the 4H filter (her top‑down idea), MNQ improves to PF 1.13–1.15 (+$44k to +$62k, beating 92–95% of random entries). Drawdowns are still $28k–$41k.
+* The same filter on MES, MYM and M2K stays clearly negative (PF 0.75–0.90).
+* Of 48 combinations, only MNQ (with the 4H filter) and M2K (5‑candle with the daily filter) are meaningfully positive, which is consistent with chance across that many tries.
+* Costs dominate on 1H at 1% risk: tight stops mean many contracts, so commissions and slippage are 0.1–0.2R per trade.
+
+**Verdict:** this confirms Tori's own words and transcript 2. Taking every 1H trendline break is break‑even at best (MNQ) and a heavy loser elsewhere. With overnight holding, 1% risk and $28k–$190k drawdowns, it is not viable on a 50K prop account. The only workable 1H variant found is the intraday, 4H‑filtered MNQ version at $100 risk (§5).
