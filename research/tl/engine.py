@@ -80,7 +80,9 @@ def align_htf(df: pd.DataFrame, htf_dir: pd.Series) -> np.ndarray:
 
 
 def run(df: pd.DataFrame, spec: Spec, cfg: Cfg, L: Lines | None = None, atr: np.ndarray | None = None,
-        htf: list[np.ndarray] | None = None) -> pd.DataFrame:
+        htf: list[np.ndarray] | None = None, ext_sig: np.ndarray | None = None,
+        ext_stop: np.ndarray | None = None) -> pd.DataFrame:
+    """ext_sig/ext_stop: externally computed signals (strat='X'), evaluated on bar close like the built-ins."""
     o, h, l, c = (df[x].values for x in ('open', 'high', 'low', 'close'))
     n = len(c)
     if atr is None:
@@ -226,6 +228,9 @@ def run(df: pd.DataFrame, spec: Spec, cfg: Cfg, L: Lines | None = None, atr: np.
                     retest_short = None
                 elif h[t] >= v - cfg.tol * atr[t] and c[t] < v and c[t] < o[t]:
                     sig = -1; st = max(h[t], v) + 0.1 * atr[t]; retest_short = None
+        if cfg.strat == 'X':
+            if ext_sig[t] != 0:
+                sig = int(ext_sig[t]); st = ext_stop[t]
         if cfg.strat == 'R':
             if rng.random() < cfg.rand_p:
                 sig = 1 if rng.random() < 0.5 else -1

@@ -68,3 +68,42 @@ Scaling each tested MNQ variant linearly to $700/week (`reports/mnq_1h_intraday_
   * **A — forward test in TradingView (no code).** Open an MNQ1! 1H chart, add the strategy, and leave it running. New trades appear in the Strategy Tester's *List of Trades* as bars close. Optionally create an alert on the strategy ("alert() function calls only", no webhook) so every signal is logged and pushed to your phone. Then place matching orders by hand on the *Paper Trading* broker if you want broker‑side fills.
   * **B — automated paper test.** Create the alert with webhook → `bridge/` running in PaperBroker mode on a VPS. This needs 2FA on TradingView and a public HTTPS endpoint.
 * **Timing:** Friday 2026‑11‑27 is the post‑Thanksgiving half day (CME equity futures close early, about 13:15 ET). The market is closed this weekend and reopens Sunday at 18:00 ET. The strategy only enters 10:00–15:30 ET, so **no trade can occur tonight or over the weekend**. The first possible signal is Monday 2026‑11‑30 after the 10:00 ET bar closes.
+
+## 5. Step 1 results (2026‑11‑27): longer data + new intraday entries
+
+**Data:** 5‑minute MNQ, 2022‑12‑26 → 2026‑11‑25 (277k bars).
+* Built from Tradovate demo history: 15 quarterly contracts, rolled on the Thursday before expiry week, unadjusted. This is `data/raw/MNQ_5m_tv.csv`.
+* Extended with TradingView NQ1! 5m after 2026‑08‑25. The combined series is `data/raw/MNQ_5m_long.csv`.
+* The overlap check against TradingView shows a mean |close diff| of 0.47 pt. The only gaps are exchange holidays.
+
+**Test design (`research/run_intraday_entries.py`, `reports/intraday_entries.csv`):**
+* 2023–2025 in‑sample; 2026 out‑of‑sample, sealed.
+* $100 risk, MNQ, intraday, costs included.
+* 4 trades/day max, 3 consecutive losses, $550/$700 daily limits.
+* 10 entry families × 3 trend filters (none/4H/daily) × 3–4 exits = 66 configurations.
+
+**Entry families:** ORB 15/30 min (stop at the range, the midpoint or 1 ATR), VWAP pullback, EMA20 pullback, 5m trendline breakout in the morning and afternoon windows.
+
+**Best configurations that trade ≥ 0.5/day (in‑sample ranked):**
+
+| Entry | Filter | Exit | Trades/day | IS exp R | IS $/week | 2023 / 2024 / 2025 | 2026 OOS exp R | 2026 $/week |
+|---|---|---|---|---|---|---|---|---|
+| ORB15, 1‑ATR stop | none | ATR trail | 1.11 | +0.11 | +$39 | +3.0k / +0.6k / +3.7k | −0.01 | −$14 |
+| ORB30, 1‑ATR stop | none | ATR trail | 0.90 | +0.08 | +$24 | +3.4k / +2.3k / +2.5k | +0.07 | +$12 |
+| ORB15, 1‑ATR stop | 4H | ATR trail | 0.54 | +0.05 | +$12 | +3.1k / +0.9k / −0.5k | −0.16 | −$21 |
+| EMA20 pullback | daily | ATR trail | 1.77 | +0.04 | +$31 | +6.0k / +6.0k / −6.9k | +0.01 | +$5 |
+| 5m trendline (windows) | daily | ATR trail | 2.19 | +0.03 | +$20 | +6.7k / +1.7k / −5.2k | +0.11 | +$103 |
+| VWAP pullback | daily | ATR trail | 1.08 | +0.03 | +$12 | +0.8k / +1.5k / −0.7k | −0.11 | −$25 |
+
+**Every other configuration is ≤ 0R in‑sample.** The ORB variants with very high R (ORB30, range stop) took only 7–12 trades in three years, because the range stop is usually too wide for $100.
+
+**Verdict:**
+* None of the new entries produces a usable edge.
+* At 1–2 trades/day the best in‑sample expectancy is about +0.1R. That is roughly the size of costs (0.05–0.15R) and within random noise, and none holds up in both the in‑sample years and 2026.
+* **$700/week at 2 trades/day would need ~0.7R per trade at $100 risk.** That is about 7× the best result here, and higher size makes the drawdowns proportionally larger.
+* The 2‑trades‑a‑day, $700‑a‑week goal is **not supported** by any tested trendline, ORB, VWAP or EMA entry on MNQ.
+
+**What remains worth trying** (lower expectations):
+1. A regime filter that trades only on high‑range trend days (daily ATR percentile plus opening drive). All the families make money on a handful of trend days and bleed on the rest.
+2. The same tests on MES/M2K/MCL/MGC, to diversify frequency rather than force it from one market.
+3. Accepting a lower, realistic target: ~$20–40/week at $100 risk, or a proportionally larger target only once the account has a buffer above its trailing drawdown.

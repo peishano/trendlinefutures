@@ -39,8 +39,8 @@ SPECS = {
 }
 
 
-def load(sym: str, tf: str) -> pd.DataFrame:
-    df = pd.read_csv(os.path.join(RAW, f'{sym}_{tf}.csv'))
+def load(sym: str, tf: str, path: str | None = None) -> pd.DataFrame:
+    df = pd.read_csv(path or os.path.join(RAW, f'{sym}_{tf}.csv'))
     df['ts'] = pd.to_datetime(df.t, unit='s', utc=True).dt.tz_convert('America/New_York')
     df = df.rename(columns={'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'})
     df = df[['ts', 'open', 'high', 'low', 'close', 'volume']].reset_index(drop=True)
